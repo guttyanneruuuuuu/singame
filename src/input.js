@@ -150,4 +150,5 @@ export class Input {
       enable();
     }
   }
+  recalibrate() { this.tiltZero = null; }
 }

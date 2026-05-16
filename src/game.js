@@ -61,9 +61,9 @@ export class Game {
 
   _setupRenderer() {
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.setClearColor(0x1a1f3a, 1);
   }
 
@@ -82,7 +82,7 @@ export class Game {
     const sun = new THREE.DirectionalLight(0xfff0d8, 1.0);
     sun.position.set(8, 16, 10);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(1024, 1024);
+    sun.shadow.mapSize.set(512, 512);
     sun.shadow.camera.near = 1; sun.shadow.camera.far = 50;
     sun.shadow.camera.left = -15; sun.shadow.camera.right = 15;
     sun.shadow.camera.top = 15; sun.shadow.camera.bottom = -15;
@@ -231,6 +231,9 @@ export class Game {
 
     this.players = players.map((p, i) => this._createPlayer(p, i, players.length));
     this.localPlayer = this.players.find(p => p.isLocal) || this.players[0];
+
+    // Recalibrate tilt to current device pose
+    if (this.input && this.input.recalibrate) this.input.recalibrate();
 
     this.matchTime = MATCH_SECONDS;
     this.running = true;
