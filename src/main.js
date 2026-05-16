@@ -57,12 +57,13 @@ ui.on('rematch', () => {
   if (game.multiplayer) net.broadcastStart();
 });
 
-// Automated smoke test (?test=auto): start a quick 1v1 AI match and log status
+// Automated smoke test (?test=auto): start a quick AI match and log status
 if (location.search.includes('test=auto')) {
+  const mode = (new URL(location.href).searchParams.get('mode')) || '1v1';
   window.addEventListener('load', () => {
     setTimeout(() => {
       ui.showScreen('game');
-      game.startMatch({ mode: '1v1', multiplayer: false, players: buildBotPlayers('1v1') });
+      game.startMatch({ mode, multiplayer: false, players: buildBotPlayers(mode) });
       // Tick a synthetic tap every 1.5s
       let n = 0;
       const iv = setInterval(() => {

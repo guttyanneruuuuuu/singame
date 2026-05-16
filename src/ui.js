@@ -29,11 +29,18 @@ export class UI {
   }
 
   _bindTitle() {
+    const descs = {
+      '1v1': 'タイマン勝負。先に多く落とした方が勝ち。',
+      'ffa6': '6人個人戦。みんな敵。最高KO数を狙え。',
+      '3v3': '3人チームバトル。味方とエッジへ追い込め。',
+    };
     document.querySelectorAll('#screen-title .seg-btn').forEach(b => {
       b.addEventListener('click', () => {
         document.querySelectorAll('#screen-title .seg-btn').forEach(x => x.classList.remove('active'));
         b.classList.add('active');
         this.mode = b.dataset.mode;
+        const d = document.getElementById('mode-desc');
+        if (d) d.textContent = descs[this.mode] || '';
       });
     });
     document.querySelectorAll('#screen-title [data-action]').forEach(b => {

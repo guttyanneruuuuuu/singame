@@ -2,20 +2,32 @@
 export class AI {
   constructor() {
     this.cooldownThink = 0;
-    this.commit = null; // current plan
+    this.targetId = null;
+    this.targetKeepFor = 0;
   }
   update(p, game, dt) {
     this.cooldownThink -= dt;
+    this.targetKeepFor -= dt;
 
-    // Pick target: nearest alive enemy
-    let target = null, td = 1e9;
-    for (const q of game.players) {
-      if (q === p || !q.alive) continue;
-      if (game.mode === '3v3' && q.team === p.team) continue;
-      const d = Math.hypot(q.mesh.position.x - p.mesh.position.x, q.mesh.position.z - p.mesh.position.z);
-      if (d < td) { td = d; target = q; }
+    // Pick target: stick with current target unless dead/changed
+    let target = null;
+    if (this.targetId && this.targetKeepFor > 0) {
+      target = game.players.find(q => q.id === this.targetId);
+      if (target && (!target.alive || (game.mode === '3v3' && target.team === p.team))) target = null;
+    }
+    if (!target) {
+      // Pick nearest enemy; in FFA, prefer leading score sometimes
+      let bestD = 1e9;
+      for (const q of game.players) {
+        if (q === p || !q.alive) continue;
+        if (game.mode === '3v3' && q.team === p.team) continue;
+        const d = Math.hypot(q.mesh.position.x - p.mesh.position.x, q.mesh.position.z - p.mesh.position.z);
+        if (d < bestD) { bestD = d; target = q; }
+      }
+      if (target) { this.targetId = target.id; this.targetKeepFor = 3 + Math.random() * 2; }
     }
     if (!target) return;
+    const td = Math.hypot(target.mesh.position.x - p.mesh.position.x, target.mesh.position.z - p.mesh.position.z);
 
     // If close to edge, push inward instinctively (survival)
     const r = Math.hypot(p.mesh.position.x, p.mesh.position.z);

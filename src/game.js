@@ -271,11 +271,22 @@ export class Game {
   }
 
   _createPlayer(info, index, total) {
-    const angle = (index / total) * Math.PI * 2;
-    const r = ARENA_RADIUS * 0.55;
+    // For 3v3, position teams on opposite sides
+    let angle, r = ARENA_RADIUS * 0.55;
+    if (this.mode === '3v3') {
+      const teamIndex = this.players.filter(pp => pp.team === info.team).length; // 0..2
+      const base = info.team === 0 ? -Math.PI / 2 : Math.PI / 2;
+      angle = base + (teamIndex - 1) * 0.5;
+    } else {
+      angle = (index / total) * Math.PI * 2;
+    }
     const x = Math.cos(angle) * r;
     const z = Math.sin(angle) * r;
-    const color = new THREE.Color(info.color || COLORS[index % COLORS.length]);
+    // In 3v3, body color = team color; ring color = local indicator
+    let bodyColorHex;
+    if (this.mode === '3v3') bodyColorHex = info.team === 0 ? '#3d5a80' : '#e07a5f';
+    else bodyColorHex = info.color || COLORS[index % COLORS.length];
+    const color = new THREE.Color(bodyColorHex);
 
     const group = new THREE.Group();
 
@@ -305,14 +316,26 @@ export class Game {
     pupR.position.set( 0.16, 0.65, 0.43);
     group.add(pupL); group.add(pupR);
 
-    // Outline ring (team color)
-    const ringGeo = new THREE.RingGeometry(0.55, 0.7, 24);
-    const ringColor = info.team === 0 ? 0x3d5a80 : (info.team === 1 ? 0xe07a5f : 0x81b29a);
-    const ringMat = new THREE.MeshBasicMaterial({ color: ringColor, side: THREE.DoubleSide, transparent: true, opacity: 0.65 });
+    // Outline ring: local player gets bright accent; others get team/individual color softer
+    const ringGeo = new THREE.RingGeometry(0.55, 0.78, 28);
+    const ringColorHex = info.isLocal ? 0xfff0d8 : bodyColorHex;
+    const ringMat = new THREE.MeshBasicMaterial({ color: ringColorHex, side: THREE.DoubleSide, transparent: true, opacity: info.isLocal ? 0.95 : 0.5 });
     const ring = new THREE.Mesh(ringGeo, ringMat);
     ring.rotation.x = -Math.PI / 2;
     ring.position.y = 0.03;
     group.add(ring);
+
+    // Local player gets a vertical beacon
+    if (info.isLocal) {
+      const beacon = new THREE.Mesh(
+        new THREE.ConeGeometry(0.25, 0.6, 12),
+        new THREE.MeshBasicMaterial({ color: 0xfff0d8, transparent: true, opacity: 0.7 })
+      );
+      beacon.position.y = 1.95;
+      beacon.rotation.x = Math.PI; // pointing down at player
+      group.add(beacon);
+      group._beacon = beacon;
+    }
 
     // Name label (sprite)
     const label = this._makeLabel(info.name || 'P', info.isLocal);
@@ -656,8 +679,12 @@ export class Game {
       // No artificial edge resistance — falling is the point of the game.
 
       // Bob head while moving
-      const t = performance.now() * 0.01;
-      p.body.position.y = 0.55 + Math.sin(t * (1 + speed * 0.4)) * 0.04 * Math.min(1, speed * 0.2);
+      const tt = performance.now() * 0.01;
+      p.body.position.y = 0.55 + Math.sin(tt * (1 + speed * 0.4)) * 0.04 * Math.min(1, speed * 0.2);
+      if (p.mesh._beacon) {
+        p.mesh._beacon.position.y = 1.95 + Math.sin(tt * 0.5) * 0.2;
+        p.mesh._beacon.rotation.y = tt * 0.3;
+      }
     }
 
     // Player-player collisions (simple sphere)
@@ -871,9 +898,11 @@ export class Game {
       leftHTML = `<b>青チーム</b><br><span>${t0}</span>`;
       rightHTML = `<b>赤チーム</b><br><span>${t1}</span>`;
     } else {
-      const sorted = [...this.players].sort((a,b)=>b.kos-a.kos).slice(0,2);
-      leftHTML = `<b>1位</b><br><span>${escapeHTML(sorted[0]?.name||'-')} ${sorted[0]?.kos||0}</span>`;
-      rightHTML = `<b>あなた</b><br><span>${this.localPlayer.kos} KO</span>`;
+      const sorted = [...this.players].sort((a,b)=>b.kos-a.kos);
+      const top = sorted[0];
+      const myRank = sorted.indexOf(this.localPlayer) + 1;
+      leftHTML = `<b>${escapeHTML(top?.name||'-')}</b><br><span>1位 ・ ${top?.kos||0} KO</span>`;
+      rightHTML = `<b>あなた</b><br><span>${myRank}位 ・ ${this.localPlayer.kos} KO</span>`;
     }
     this.ui.setScores(leftHTML, rightHTML);
     this.ui.setTimer(this.matchTime);
