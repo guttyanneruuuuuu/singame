@@ -29,7 +29,7 @@ export class AI {
     this.cooldownThink = 0.5 + Math.random() * 0.5;
 
     // Decide action by distance & cooldowns
-    if (td < 2.0 && p.cdPulse <= 0 && Math.random() < 0.8) {
+    if (td < 3.2 && p.cdPulse <= 0 && Math.random() < 0.7) {
       // Pulse
       p.cdPulse = 4.0;
       game._spawnPulse(p, 4.0);

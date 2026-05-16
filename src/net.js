@@ -118,6 +118,7 @@ export class Net {
       this._refreshRoomList();
     } else if (d.t === 'start') {
       this.players = d.players.map(p => ({ ...p, isLocal: p.id === this.peer.id, isBot: false }));
+      this.game.setHost(false);
       this.ui.showScreen('game');
       this.emit('remote-start', this.players);
     } else if (d.t === 'input') {
@@ -160,6 +161,7 @@ export class Net {
   broadcastStart() {
     if (!this.isHost) return;
     const players = this.buildPlayersFromRoom();
+    this.game.setHost(true);
     const payload = { t: 'start', players };
     this.conns.forEach(c => { try { c.send(payload); } catch {} });
   }

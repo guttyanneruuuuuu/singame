@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { AI } from './ai.js';
 import { Input } from './input.js';
 
-const ARENA_RADIUS = 9;
+const ARENA_RADIUS = 7;
 const FALL_Y = -8;
 const RESPAWN_TIME = 1.5;
 const MATCH_SECONDS = 120;
@@ -172,6 +172,7 @@ export class Game {
     this.mode = mode;
     this.multiplayer = !!multiplayer;
     this.lastPlayers = players;
+    if (!multiplayer) this._hostFlag = true;
 
     // Reset arena tilt
     this.arenaTiltX = this.arenaTiltZ = this.targetTiltX = this.targetTiltZ = 0;
@@ -287,6 +288,8 @@ export class Game {
       facing: angle + Math.PI, // face toward center
       ai: info.isBot ? new AI() : null,
       pullState: null,
+      lastHitBy: null,
+      lastHitAt: 0,
     };
   }
 
@@ -493,13 +496,17 @@ export class Game {
     this.arenaGroup.rotation.x = this.arenaTiltX;
     this.arenaGroup.rotation.z = this.arenaTiltZ;
 
+    // In multiplayer non-host mode, only simulate local player; host state handles others.
+    const isClient = this.multiplayer && !this._isHost();
     // Update players
     for (const p of this.players) {
-      // Cooldowns
+      // Cooldowns (always)
       if (p.cdPulse > 0) p.cdPulse = Math.max(0, p.cdPulse - dt);
       if (p.cdDash > 0)  p.cdDash  = Math.max(0, p.cdDash  - dt);
       if (p.cdTilt > 0)  p.cdTilt  = Math.max(0, p.cdTilt  - dt);
       if (p.stunned > 0) p.stunned = Math.max(0, p.stunned - dt);
+
+      if (isClient && !p.isLocal) continue; // remote players are server-driven
 
       if (!p.alive) {
         p.respawnTimer -= dt;
@@ -507,8 +514,8 @@ export class Game {
         continue;
       }
 
-      // AI logic
-      if (p.ai) p.ai.update(p, this, dt);
+      // AI logic (only host runs AI)
+      if (p.ai && !isClient) p.ai.update(p, this, dt);
 
       // Gravity from arena tilt (simulated as a horizontal force)
       // Tilt rotation makes the floor slope. Convert to in-plane force.
@@ -519,7 +526,7 @@ export class Game {
       p.vz += accZ * dt;
 
       // Damping
-      const damp = p.onGround ? 1.2 : 0.4;
+      const damp = p.onGround ? 0.9 : 0.3;
       const f = Math.exp(-damp * dt);
       p.vx *= f; p.vz *= f;
 
@@ -554,19 +561,7 @@ export class Game {
       if (speed > 1.5) p.facing = Math.atan2(p.vx, p.vz);
       p.mesh.rotation.y = p.facing;
 
-      // Bounce off arena rim (slight)
-      if (distXZ > ARENA_RADIUS - 0.4 && p.onGround) {
-        // Soft inward push so players don't always immediately fly off; but can be overridden by strong velocity
-        const nx = p.mesh.position.x / distXZ, nz = p.mesh.position.z / distXZ;
-        const outwardSpeed = p.vx * nx + p.vz * nz;
-        if (outwardSpeed < 0) {
-          // moving inward, leave alone
-        } else if (outwardSpeed < 3 && p.stunned <= 0) {
-          // soft edge resistance
-          p.vx -= nx * outwardSpeed * 0.5;
-          p.vz -= nz * outwardSpeed * 0.5;
-        }
-      }
+      // No artificial edge resistance — falling is the point of the game.
 
       // Bob head while moving
       const t = performance.now() * 0.01;
@@ -596,7 +591,16 @@ export class Game {
             const imp = vn * 0.9;
             a.vx -= nx * imp; a.vz -= nz * imp;
             b.vx += nx * imp; b.vz += nz * imp;
-            if (vn > 5) { this.audio.hit(); a.stunned = Math.max(a.stunned, 0.15); b.stunned = Math.max(b.stunned, 0.15); }
+            if (vn > 4) {
+              this.audio.hit();
+              a.stunned = Math.max(a.stunned, 0.12);
+              b.stunned = Math.max(b.stunned, 0.12);
+              // Attribution: faster mover hit the slower
+              const aSpd = Math.hypot(a.vx, a.vz), bSpd = Math.hypot(b.vx, b.vz);
+              const now = performance.now();
+              if (aSpd > bSpd) { b.lastHitBy = a; b.lastHitAt = now; }
+              else { a.lastHitBy = b; a.lastHitAt = now; }
+            }
           }
         }
       }
@@ -626,6 +630,8 @@ export class Game {
           e.applied = true;
           for (const p of this.players) {
             if (p === e.owner || !p.alive) continue;
+            // Friendly fire off in 3v3
+            if (this.mode === '3v3' && e.owner && p.team === e.owner.team) continue;
             const dx = p.mesh.position.x - e.mesh.position.x;
             const dz = p.mesh.position.z - e.mesh.position.z;
             const d = Math.hypot(dx, dz);
@@ -634,7 +640,9 @@ export class Game {
               const nx = dx / Math.max(d, 0.001), nz = dz / Math.max(d, 0.001);
               const pwr = 14 * f;
               p.vx += nx * pwr; p.vz += nz * pwr; p.vy = Math.max(p.vy, 2 + f * 4);
-              p.stunned = 0.25;
+              p.stunned = 0.2;
+              p.lastHitBy = e.owner;
+              p.lastHitAt = performance.now();
             }
           }
         }
@@ -656,6 +664,29 @@ export class Game {
 
     // HUD
     this._updateHUD();
+
+    // Host state sync (limited rate)
+    this._netAccum = (this._netAccum || 0) + dt;
+    if (this.multiplayer && this._netAccum >= 0.08) { // ~12 Hz
+      this._netAccum = 0;
+      if (this.onHostState) {
+        const state = {
+          t: performance.now() | 0,
+          players: this.players.map(p => ({
+            id: p.id,
+            x: +p.mesh.position.x.toFixed(2),
+            y: +p.mesh.position.y.toFixed(2),
+            z: +p.mesh.position.z.toFixed(2),
+            vx: +p.vx.toFixed(2), vy: +p.vy.toFixed(2), vz: +p.vz.toFixed(2),
+            kos: p.kos, deaths: p.deaths, alive: p.alive, stunned: +p.stunned.toFixed(2),
+          })),
+          tiltX: +this.arenaTiltX.toFixed(3),
+          tiltZ: +this.arenaTiltZ.toFixed(3),
+          time: +this.matchTime.toFixed(2),
+        };
+        this.onHostState(state);
+      }
+    }
   }
 
   _kill(p) {
@@ -665,20 +696,25 @@ export class Game {
     p.respawnTimer = RESPAWN_TIME;
     this.audio.fall();
     this._spawnFallBurst(p);
-    // attribute KO to last hitter? For simplicity: last attacker = closest pulse owner within recent time, or skip
-    // Score: everyone else gets +1 if not same team, simplification:
-    // In 1v1/ffa, every other player except p gets a "kill chance" – but to keep it fair, only the *last toucher* should score.
-    // Simple rule: nearest opponent within 4u at fall time gets +1
-    let best = null, bestD = 4;
-    for (const q of this.players) {
-      if (q === p || !q.alive) continue;
-      if (this.mode === '3v3' && q.team === p.team) continue;
-      const d = Math.hypot(q.mesh.position.x - p.mesh.position.x, q.mesh.position.z - p.mesh.position.z);
-      if (d < bestD) { bestD = d; best = q; }
+
+    // Attribution: prefer recent lastHitBy (within 3s)
+    let killer = null;
+    if (p.lastHitBy && (performance.now() - p.lastHitAt) < 3000 && p.lastHitBy.alive !== undefined && p.lastHitBy !== p) {
+      if (!(this.mode === '3v3' && p.lastHitBy.team === p.team)) killer = p.lastHitBy;
     }
-    if (best) best.kos++;
+    // Fallback: nearest opponent within 4u
+    if (!killer) {
+      let bestD = 4;
+      for (const q of this.players) {
+        if (q === p || !q.alive) continue;
+        if (this.mode === '3v3' && q.team === p.team) continue;
+        const d = Math.hypot(q.mesh.position.x - p.mesh.position.x, q.mesh.position.z - p.mesh.position.z);
+        if (d < bestD) { bestD = d; killer = q; }
+      }
+    }
+    if (killer) killer.kos++;
     if (p === this.localPlayer) this.ui.floater('落下！', 800);
-    else if (best === this.localPlayer) this.ui.floater('KO！', 800);
+    else if (killer === this.localPlayer) this.ui.floater('KO！', 800);
   }
 
   _respawn(p) {
@@ -723,6 +759,11 @@ export class Game {
   // ---- Multiplayer hooks ----
   onLocalInput = null; // assigned by Net
   onHostState = null;
+  _isHost() {
+    // Provided externally by net; default: any local player is host in solo
+    return this._hostFlag !== false;
+  }
+  setHost(isHost) { this._hostFlag = !!isHost; }
   _broadcastInput(msg) {
     if (this.onLocalInput) this.onLocalInput(msg);
   }
@@ -740,7 +781,34 @@ export class Game {
       this._spawnDashTrail(p);
     }
   }
-  onRemoteState(state) { /* placeholder for full state sync */ }
+  onRemoteState(state) {
+    // Client receives authoritative state from host; smooth positions
+    if (!state || !state.players) return;
+    for (const s of state.players) {
+      const p = this.players.find(pp => pp.id === s.id);
+      if (!p) continue;
+      if (p.isLocal) {
+        // For local player, only reconcile if drift is large
+        const dx = s.x - p.mesh.position.x, dz = s.z - p.mesh.position.z;
+        if (Math.hypot(dx, dz) > 2.0) {
+          p.mesh.position.x = s.x; p.mesh.position.z = s.z; p.mesh.position.y = s.y;
+        }
+        p.kos = s.kos; p.deaths = s.deaths;
+      } else {
+        // Lerp remote player toward host state
+        p._targetX = s.x; p._targetY = s.y; p._targetZ = s.z;
+        p.vx = s.vx; p.vy = s.vy; p.vz = s.vz;
+        p.alive = s.alive;
+        p.mesh.visible = s.alive;
+        p.kos = s.kos; p.deaths = s.deaths;
+        // Apply immediate snap for now (cheap)
+        p.mesh.position.set(s.x, s.y, s.z);
+      }
+    }
+    this.targetTiltX = state.tiltX;
+    this.targetTiltZ = state.tiltZ;
+    this.matchTime = state.time;
+  }
 }
 
 function roundRect(ctx, x, y, w, h, r) {

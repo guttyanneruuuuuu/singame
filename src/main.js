@@ -57,6 +57,29 @@ ui.on('rematch', () => {
   if (game.multiplayer) net.broadcastStart();
 });
 
+// Automated smoke test (?test=auto): start a quick 1v1 AI match and log status
+if (location.search.includes('test=auto')) {
+  window.addEventListener('load', () => {
+    setTimeout(() => {
+      ui.showScreen('game');
+      game.startMatch({ mode: '1v1', multiplayer: false, players: buildBotPlayers('1v1') });
+      // Tick a synthetic tap every 1.5s
+      let n = 0;
+      const iv = setInterval(() => {
+        if (!game.running) { clearInterval(iv); return; }
+        // simulate gesture by calling internal handlers
+        const w = window.innerWidth, h = window.innerHeight;
+        if (n % 4 === 0) game._onTap(w/2, h/2);
+        else if (n % 4 === 1) game._onSwipe(60, 0);
+        else if (n % 4 === 2) game._onPullStart(w/2, h/2), game._onPullMove(w/2,h/2,0,-80), game._onPullEnd(w/2,h/2,0,-80);
+        else game._onSwipe(0, 60);
+        n++;
+        console.log('TEST tick', n, 'kos:', game.players.map(p=>p.kos).join('/'), 'time:', game.matchTime.toFixed(1));
+      }, 1500);
+    }, 600);
+  });
+}
+
 // Helper: build AI players for solo mode
 function buildBotPlayers(mode) {
   const me = { id: 'me', name: 'あなた', isLocal: true, isBot: false, team: 0 };
