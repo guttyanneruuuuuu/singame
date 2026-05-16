@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="theme-color" content="#0f1226" />
+<title>Gravity Duel — 重力で戦う1v1アクション</title>
+<link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- ===== Title Screen ===== -->
+    <section id="screen-title" class="screen active">
+      <div class="title-bg"></div>
+      <div class="title-content">
+        <h1 class="game-title">
+          <span class="title-line">GRAVITY</span>
+          <span class="title-line accent">DUEL</span>
+        </h1>
+        <p class="tagline">引っ張って、撃って、傾ける。<br/>重力で相手を落とせ。</p>
+        <div class="menu">
+          <button class="btn primary" data-action="solo">ひとりで遊ぶ（AI戦）</button>
+          <button class="btn" data-action="create-room">部屋を作る</button>
+          <button class="btn" data-action="join-room">部屋に参加する</button>
+          <button class="btn ghost" data-action="how-to">あそびかた</button>
+        </div>
+        <div class="mode-select">
+          <label>モード：</label>
+          <div class="seg">
+            <button class="seg-btn active" data-mode="1v1">1v1</button>
+            <button class="seg-btn" data-mode="ffa6">6人バトル</button>
+            <button class="seg-btn" data-mode="3v3">3v3</button>
+          </div>
+        </div>
+        <div class="footer-hint">スマホ縦/横どちらでもOK・音が出ます</div>
+      </div>
+    </section>
+
+    <!-- ===== Room Screen ===== -->
+    <section id="screen-room" class="screen">
+      <header class="bar">
+        <button class="iconbtn" data-action="back-title">←</button>
+        <h2 id="room-title">部屋</h2>
+        <span></span>
+      </header>
+      <div class="room-body">
+        <div class="room-card">
+          <div class="room-code-row">
+            <span class="label">部屋コード</span>
+            <div class="room-code" id="room-code">------</div>
+          </div>
+          <button class="btn small" data-action="copy-invite">招待リンクをコピー</button>
+        </div>
+        <div class="players-list" id="players-list"></div>
+        <div class="room-actions">
+          <button class="btn primary" id="btn-start-game">スタート</button>
+        </div>
+        <p class="hint">同じ部屋コードを友達に送って参加してもらおう</p>
+      </div>
+    </section>
+
+    <!-- ===== Join Screen ===== -->
+    <section id="screen-join" class="screen">
+      <header class="bar">
+        <button class="iconbtn" data-action="back-title">←</button>
+        <h2>部屋に参加</h2>
+        <span></span>
+      </header>
+      <div class="join-body">
+        <label class="field">
+          <span>部屋コード（6文字）</span>
+          <input id="join-code" inputmode="latin" maxlength="6" autocomplete="off" placeholder="ABC123" />
+        </label>
+        <button class="btn primary" data-action="do-join">参加する</button>
+      </div>
+    </section>
+
+    <!-- ===== How To ===== -->
+    <section id="screen-howto" class="screen">
+      <header class="bar">
+        <button class="iconbtn" data-action="back-title">←</button>
+        <h2>あそびかた</h2>
+        <span></span>
+      </header>
+      <div class="howto-body">
+        <div class="howto-card">
+          <div class="emoji">🫳</div>
+          <h3>引っ張って発射</h3>
+          <p>画面を<strong>長押し＋ドラッグ</strong>してキャラを引っ張り、離すとゴムのように反動で勢いよく飛ぶ。</p>
+        </div>
+        <div class="howto-card">
+          <div class="emoji">⚡</div>
+          <h3>タップで重力波</h3>
+          <p>画面を<strong>素早くタップ</strong>すると、自分の周囲に重力波が広がり相手を弾き飛ばす（クールダウンあり）。</p>
+        </div>
+        <div class="howto-card">
+          <div class="emoji">💨</div>
+          <h3>スワイプでダッシュ回避</h3>
+          <p>画面を<strong>素早くスワイプ</strong>するとその方向に短距離ダッシュ。</p>
+        </div>
+        <div class="howto-card">
+          <div class="emoji">📱</div>
+          <h3>傾けてアリーナを動かす</h3>
+          <p>スマホを<strong>傾ける</strong>とアリーナ全体が傾く（独自要素！）。相手を端から落とそう。</p>
+        </div>
+        <div class="howto-card">
+          <div class="emoji">🏆</div>
+          <h3>勝利条件</h3>
+          <p>アリーナから相手を落とす。落ちたら復活、規定回数落とせば勝ち。約2分で1試合。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Game ===== -->
+    <section id="screen-game" class="screen">
+      <canvas id="three-canvas"></canvas>
+
+      <!-- HUD -->
+      <div class="hud">
+        <div class="hud-top">
+          <div class="score-box" id="score-left"></div>
+          <div class="timer" id="timer">2:00</div>
+          <div class="score-box right" id="score-right"></div>
+        </div>
+        <div class="hud-bottom">
+          <div class="cooldown-row">
+            <div class="cd-pill" id="cd-pulse"><span class="cd-label">⚡波</span><span class="cd-bar"><i></i></span></div>
+            <div class="cd-pill" id="cd-dash"><span class="cd-label">💨ダッシュ</span><span class="cd-bar"><i></i></span></div>
+            <div class="cd-pill" id="cd-tilt"><span class="cd-label">📱傾け</span><span class="cd-bar"><i></i></span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Drag indicator -->
+      <div class="drag-indicator" id="drag-indicator">
+        <svg viewBox="-50 -50 100 100" width="100%" height="100%">
+          <line id="drag-line" x1="0" y1="0" x2="0" y2="0" stroke="white" stroke-width="3" stroke-linecap="round"/>
+          <circle id="drag-end" cx="0" cy="0" r="6" fill="white"/>
+        </svg>
+      </div>
+
+      <!-- Floating messages -->
+      <div class="floater" id="floater"></div>
+
+      <!-- Pause / End overlays -->
+      <button class="pause-btn" data-action="pause">II</button>
+      <div class="overlay" id="overlay-pause">
+        <div class="overlay-card">
+          <h2>一時停止</h2>
+          <button class="btn primary" data-action="resume">つづける</button>
+          <button class="btn" data-action="quit">やめる</button>
+        </div>
+      </div>
+      <div class="overlay" id="overlay-end">
+        <div class="overlay-card">
+          <h2 id="end-title">結果</h2>
+          <div id="end-detail"></div>
+          <button class="btn primary" data-action="rematch">もう一度</button>
+          <button class="btn" data-action="quit">タイトルへ</button>
+        </div>
+      </div>
+
+      <!-- Tilt permission button (iOS) -->
+      <button class="tilt-perm" id="tilt-perm" hidden>📱 傾け操作を有効にする</button>
+    </section>
+
+    <!-- Toast -->
+    <div id="toast"></div>
+  </div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+      }
+    }
+  </script>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
