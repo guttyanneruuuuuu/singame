@@ -156,6 +156,29 @@ export class UI {
     bar.style.transform = `scaleX(${ratio})`;
     el.classList.toggle('ready', ratio >= 0.999);
   }
+  setBuffs(buffs) {
+    const el = document.getElementById('buffs');
+    if (!el) return;
+    el.innerHTML = '';
+    const list = [
+      { key: 'pulse', label: '⚡×', cls: '' },
+      { key: 'dash',  label: '💨×', cls: 'dash' },
+      { key: 'heavy', label: '🪨×', cls: 'heavy' },
+    ];
+    list.forEach(b => {
+      const n = buffs[b.key] || 0;
+      if (n > 0) {
+        const p = document.createElement('div');
+        p.className = 'buff-pill ' + b.cls;
+        p.textContent = b.label + n;
+        el.appendChild(p);
+      }
+    });
+  }
+  hideHintStrip() {
+    const el = document.getElementById('hint-strip');
+    if (el) el.classList.add('hidden');
+  }
   floater(msg, ms = 900) {
     const f = document.getElementById('floater');
     f.textContent = msg;

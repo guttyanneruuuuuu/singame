@@ -155,6 +155,47 @@ export class Game {
     this.aimArrow = new THREE.Mesh(arrowGeo, arrowMat);
     this.aimArrow.visible = false;
     this.arenaGroup.add(this.aimArrow);
+
+    // Trajectory preview dots (predicted landing)
+    this.trajectoryDots = [];
+    for (let i = 0; i < 10; i++) {
+      const d = new THREE.Mesh(
+        new THREE.SphereGeometry(0.08, 8, 6),
+        new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6 })
+      );
+      d.visible = false;
+      this.arenaGroup.add(d);
+      this.trajectoryDots.push(d);
+    }
+
+    // Orbs (power-ups)
+    this.orbs = [];
+    this.orbTimer = 0;
+  }
+
+  _spawnOrb() {
+    const types = [
+      { name: 'pulse',  color: 0xffd49a, label: '⚡' },
+      { name: 'dash',   color: 0x98c1d9, label: '💨' },
+      { name: 'heavy',  color: 0xbb6588, label: '🪨' }, // heavy = next launch is supercharged
+    ];
+    const type = types[Math.floor(Math.random() * types.length)];
+    const angle = Math.random() * Math.PI * 2;
+    const r = Math.random() * (ARENA_RADIUS - 1.5);
+    const group = new THREE.Group();
+    const core = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(0.3, 0),
+      new THREE.MeshStandardMaterial({ color: type.color, emissive: type.color, emissiveIntensity: 0.5, roughness: 0.3 })
+    );
+    group.add(core);
+    const glow = new THREE.Mesh(
+      new THREE.SphereGeometry(0.5, 16, 12),
+      new THREE.MeshBasicMaterial({ color: type.color, transparent: true, opacity: 0.25, depthWrite: false })
+    );
+    group.add(glow);
+    group.position.set(Math.cos(angle)*r, 0.8, Math.sin(angle)*r);
+    this.arenaGroup.add(group);
+    this.orbs.push({ mesh: group, core, type, t: 0, ttl: 12 });
   }
 
   _resize() {
@@ -163,7 +204,9 @@ export class Game {
     this.camera.aspect = w / h;
     // Vertical adjust for portrait
     const portrait = h > w;
-    this.camera.position.set(0, portrait ? 16 : 13, portrait ? 14 : 16);
+    const cx = 0, cy = portrait ? 15 : 12, cz = portrait ? 12 : 14;
+    this.camera.position.set(cx, cy, cz);
+    this._camBaseX = cx; this._camBaseY = cy; this._camBaseZ = cz;
     this.camera.lookAt(0, 0, 0);
     this.camera.updateProjectionMatrix();
   }
@@ -182,6 +225,9 @@ export class Game {
     this.players.forEach(p => { if (p.mesh) this.arenaGroup.remove(p.mesh); });
     this.effects.forEach(e => this.arenaGroup.remove(e.mesh));
     this.effects = [];
+    this.orbs.forEach(o => this.arenaGroup.remove(o.mesh));
+    this.orbs = [];
+    this.orbTimer = 4;
 
     this.players = players.map((p, i) => this._createPlayer(p, i, players.length));
     this.localPlayer = this.players.find(p => p.isLocal) || this.players[0];
@@ -194,6 +240,9 @@ export class Game {
     this._updateHUD();
     this.ui.floater('READY!', 700);
     setTimeout(() => this.ui.floater('GO!', 600), 800);
+    setTimeout(() => this.ui.hideHintStrip(), 15000);
+    const hs = document.getElementById('hint-strip');
+    if (hs) hs.classList.remove('hidden');
   }
 
   endMatch(silent = false) {
@@ -290,6 +339,7 @@ export class Game {
       pullState: null,
       lastHitBy: null,
       lastHitAt: 0,
+      buffs: {}, // pulse: timer, dash: timer, heavy: count
     };
   }
 
@@ -345,12 +395,39 @@ export class Game {
       this.aimArrow.position.z += worldDir.z * (0.8 + power * 1.6);
       const yaw = Math.atan2(worldDir.x, worldDir.z);
       this.aimArrow.rotation.set(Math.PI / 2, 0, -yaw);
+
+      // Trajectory dots prediction
+      const speed = 6 + power * 12;
+      const vx = worldDir.x * speed;
+      const vz = worldDir.z * speed;
+      const vy0 = 0.5 + power * 1.5;
+      let sx = p.mesh.position.x, sy = p.mesh.position.y + 0.5, sz = p.mesh.position.z;
+      let svx = vx, svy = vy0, svz = vz;
+      const G = 18, dampG = 0.9;
+      const stepDt = 0.06;
+      for (let i = 0; i < this.trajectoryDots.length; i++) {
+        // simulate
+        for (let k = 0; k < 2; k++) {
+          svx *= Math.exp(-dampG * stepDt);
+          svz *= Math.exp(-dampG * stepDt);
+          svy -= G * stepDt;
+          sx += svx * stepDt;
+          sy += svy * stepDt;
+          sz += svz * stepDt;
+          if (sy < 0 && Math.hypot(sx, sz) < ARENA_RADIUS - 0.2) { sy = 0; svy = 0; }
+        }
+        const dot = this.trajectoryDots[i];
+        dot.position.set(sx, Math.max(sy, 0.05), sz);
+        dot.visible = true;
+        dot.material.opacity = 0.55 * (1 - i / this.trajectoryDots.length);
+      }
     }
   }
   _onPullEnd(x, y, dx, dy) {
     this.ui.hideDragIndicator();
     this.aimRing.visible = false;
     this.aimArrow.visible = false;
+    this.trajectoryDots.forEach(d => d.visible = false);
     const p = this.localPlayer;
     if (!p || !p.pullState) return;
     p.pullState = null;
@@ -361,10 +438,12 @@ export class Game {
     const power = len / maxLen;
     const world = this._screenDeltaToWorld(-dx, -dy);
     if (!world) return;
-    const speed = 6 + power * 12;
+    let mult = 1;
+    if (p.buffs.heavy && p.buffs.heavy > 0) { mult = 1.8; p.buffs.heavy--; this.ui.floater('🪨 HEAVY!', 600); }
+    const speed = (6 + power * 12) * mult;
     p.vx = world.x * speed;
     p.vz = world.z * speed;
-    p.vy = Math.max(p.vy, 0.5 + power * 1.5);
+    p.vy = Math.max(p.vy, (0.5 + power * 1.5) * mult);
     p.facing = Math.atan2(world.x, world.z);
     this.audio.shoot();
     this._broadcastInput({ kind: 'launch', vx: p.vx, vz: p.vz, vy: p.vy, x: p.mesh.position.x, z: p.mesh.position.z });
@@ -374,8 +453,10 @@ export class Game {
     const p = this.localPlayer;
     if (!p || !p.alive || p.stunned > 0) return;
     if (p.cdPulse > 0) return;
+    const range = (p.buffs.pulse && p.buffs.pulse > 0) ? 6.0 : 4.0;
+    if (p.buffs.pulse > 0) { p.buffs.pulse--; this.ui.floater('⚡ MEGA WAVE!', 600); }
     p.cdPulse = 4.0;
-    this._spawnPulse(p, 4.0);
+    this._spawnPulse(p, range);
     this.audio.pulse();
     this._broadcastInput({ kind: 'pulse', x: p.mesh.position.x, z: p.mesh.position.z });
   }
@@ -386,8 +467,10 @@ export class Game {
     if (p.cdDash > 0) return;
     const world = this._screenDeltaToWorld(dx, dy);
     if (!world) return;
-    p.vx = world.x * 16;
-    p.vz = world.z * 16;
+    let dashSpeed = 16;
+    if (p.buffs.dash && p.buffs.dash > 0) { dashSpeed = 24; p.buffs.dash--; this.ui.floater('💨 TURBO!', 600); }
+    p.vx = world.x * dashSpeed;
+    p.vz = world.z * dashSpeed;
     p.cdDash = 2.5;
     p.facing = Math.atan2(world.x, world.z);
     this._spawnDashTrail(p);
@@ -478,6 +561,15 @@ export class Game {
 
     if (this.running && !this.paused) {
       this._update(dt);
+    }
+    // Screen shake (apply temp camera offset)
+    if (this._shake > 0) {
+      this._shake = Math.max(0, this._shake - dt);
+      const k = this._shake * 0.4;
+      this.camera.position.x = this._camBaseX + (Math.random() - 0.5) * k;
+      this.camera.position.y = this._camBaseY + (Math.random() - 0.5) * k;
+      this.camera.position.z = this._camBaseZ + (Math.random() - 0.5) * k;
+      if (this._shake <= 0) this.camera.position.set(this._camBaseX, this._camBaseY, this._camBaseZ);
     }
     this.renderer.render(this.scene, this.camera);
   }
@@ -606,6 +698,42 @@ export class Game {
       }
     }
 
+    // Orbs spawn & lifecycle (host-only)
+    if (!isClient) {
+      this.orbTimer -= dt;
+      if (this.orbTimer <= 0 && this.orbs.length < 2) {
+        this._spawnOrb();
+        this.orbTimer = 6 + Math.random() * 4;
+      }
+    }
+    for (let i = this.orbs.length - 1; i >= 0; i--) {
+      const o = this.orbs[i];
+      o.t += dt;
+      o.mesh.rotation.y += dt * 1.5;
+      o.mesh.position.y = 0.8 + Math.sin(o.t * 3) * 0.15;
+      // Pickup
+      for (const p of this.players) {
+        if (!p.alive) continue;
+        if (isClient && !p.isLocal) continue;
+        const d = Math.hypot(o.mesh.position.x - p.mesh.position.x, o.mesh.position.z - p.mesh.position.z);
+        if (d < 0.8 && p.mesh.position.y < 1.5) {
+          // grant buff
+          if (o.type.name === 'pulse') p.buffs.pulse = (p.buffs.pulse || 0) + 1;
+          else if (o.type.name === 'dash') p.buffs.dash = (p.buffs.dash || 0) + 1;
+          else if (o.type.name === 'heavy') p.buffs.heavy = (p.buffs.heavy || 0) + 1;
+          this.arenaGroup.remove(o.mesh);
+          this.orbs.splice(i, 1);
+          this.audio.tick();
+          if (p === this.localPlayer) this.ui.floater('+ ' + o.type.label + ' GET!', 700);
+          break;
+        }
+      }
+      if (o.t > o.ttl) {
+        this.arenaGroup.remove(o.mesh);
+        this.orbs.splice(i, 1);
+      }
+    }
+
     // Effects update
     for (let i = this.effects.length - 1; i >= 0; i--) {
       const e = this.effects[i];
@@ -715,6 +843,7 @@ export class Game {
     if (killer) killer.kos++;
     if (p === this.localPlayer) this.ui.floater('落下！', 800);
     else if (killer === this.localPlayer) this.ui.floater('KO！', 800);
+    this._shake = 0.5; // screen shake duration
   }
 
   _respawn(p) {
@@ -753,6 +882,7 @@ export class Game {
       this.ui.setCooldown('pulse', 1 - me.cdPulse / 4.0);
       this.ui.setCooldown('dash', 1 - me.cdDash / 2.5);
       this.ui.setCooldown('tilt', 1 - me.cdTilt / 5.0);
+      this.ui.setBuffs(me.buffs || {});
     }
   }
 

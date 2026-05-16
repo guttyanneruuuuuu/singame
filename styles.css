@@ -127,12 +127,21 @@ button { font: inherit; color: inherit; }
 .score-box.right { text-align: right; }
 .timer { background: rgba(42,47,74,0.85); color: white; padding: 8px 16px; border-radius: 999px; font-variant-numeric: tabular-nums; font-weight: 800; font-size: 18px; }
 
-.hud-bottom { display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
-.cooldown-row { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.hud-bottom { display: flex; flex-direction: column; gap: 8px; pointer-events: none; align-items: center; }
+.cooldown-row { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
 .cd-pill { background: rgba(255,250,240,0.92); border-radius: 999px; padding: 6px 10px; display: flex; align-items: center; gap: 8px; box-shadow: var(--shadow); font-size: 12px; font-weight: 700; }
-.cd-bar { display: inline-block; width: 60px; height: 6px; background: rgba(42,47,74,0.15); border-radius: 999px; overflow: hidden; position: relative; }
+.cd-bar { display: inline-block; width: 48px; height: 6px; background: rgba(42,47,74,0.15); border-radius: 999px; overflow: hidden; position: relative; }
 .cd-bar i { display: block; height: 100%; background: var(--accent); width: 100%; transform-origin: left; transition: transform 0.1s linear; }
 .cd-pill.ready .cd-bar i { background: var(--leaf); }
+
+.buffs { display: flex; gap: 6px; min-height: 26px; }
+.buff-pill { background: var(--accent); color: white; border-radius: 999px; padding: 4px 10px; font-weight: 800; font-size: 13px; box-shadow: var(--shadow); animation: pulse-in 0.4s; }
+.buff-pill.dash { background: var(--ocean); }
+.buff-pill.heavy { background: #bb6588; }
+@keyframes pulse-in { 0% { transform: scale(0.5); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+
+.hint-strip { display: flex; gap: 6px; color: rgba(255,250,240,0.85); font-size: 11px; background: rgba(20,25,50,0.5); padding: 5px 10px; border-radius: 999px; opacity: 1; transition: opacity 1s; }
+.hint-strip.hidden { opacity: 0; }
 
 /* Drag indicator */
 .drag-indicator { position: absolute; pointer-events: none; width: 200px; height: 200px; transform: translate(-50%, -50%); opacity: 0; transition: opacity 0.15s; }
